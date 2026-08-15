@@ -1,0 +1,12 @@
+{
+  "name": "asteroids",
+  "version": "1.0.0",
+  "description": "Asteroids clássico para navegador — Canvas 2D, sem dependências.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/serve.mjs",
+    "test": "node --test tests/*.test.js"
+  },
+  "license": "MIT"
+}

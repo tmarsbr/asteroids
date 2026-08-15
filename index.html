@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ASTEROIDS</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="crt-overlay" aria-hidden="true"></div>
+  <div id="scanline" aria-hidden="true"></div>
+
+  <header id="hud">
+    <div class="hud-group hud-left">
+      <div class="hud-item hud-score">
+        <span class="hud-label">PONTOS</span>
+        <div class="score-readout">
+          <span class="hud-value" id="score">000000</span>
+          <span class="scoring-streak">
+            <strong class="score-multiplier" id="score-multiplier">&times;1.0</strong>
+            <span class="accuracy-combo" id="accuracy-combo">COMBO 0</span>
+          </span>
+        </div>
+      </div>
+      <div class="hud-item">
+        <span class="hud-label">RECORDE</span>
+        <span class="hud-value" id="high-score">000000</span>
+      </div>
+    </div>
+    <div class="hud-group hud-center">
+      <div class="hud-item">
+        <span class="hud-label">ONDA</span>
+        <span class="hud-value" id="wave">1</span>
+      </div>
+    </div>
+    <div class="hud-group hud-right">
+      <div class="hud-item hud-shield">
+        <span class="hud-label">REPULSOR</span>
+        <div class="shield-readout">
+          <div
+            id="shield-meter"
+            class="meter"
+            role="progressbar"
+            aria-label="Carga do repulsor"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="100"
+          ><span id="shield-fill" class="meter-fill"></span></div>
+          <span class="meter-value" id="shield-value">100%</span>
+        </div>
+      </div>
+      <div class="hud-item hud-shield-armor">
+        <span class="hud-label">ESCUDO</span>
+        <div class="shield-readout">
+          <div
+            id="ship-shield-meter"
+            class="meter"
+            role="progressbar"
+            aria-label="Integridade do escudo da nave"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="100"
+          ><span id="ship-shield-fill" class="meter-fill"></span></div>
+          <span class="meter-value" id="ship-shield-value">100%</span>
+        </div>
+      </div>
+      <div class="hud-item">
+        <span class="hud-label">VIDAS</span>
+        <span class="hud-value" id="lives">III</span>
+      </div>
+    </div>
+  </header>
+
+  <canvas id="game" aria-label="Área de jogo do Asteroids"></canvas>
+
+  <p id="scoring-announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
+
+  <section id="ability-hud" aria-label="Sistemas de pilotagem" hidden>
+    <div class="ability-card" id="ability-dash">
+      <kbd>SHIFT</kbd>
+      <span class="ability-name">IMPULSO</span>
+      <span class="ability-status" id="dash-status">PRONTO</span>
+    </div>
+    <div class="ability-card" id="ability-shield">
+      <kbd>E</kbd>
+      <span class="ability-name">REPULSOR</span>
+      <span class="ability-status" id="shield-status">PRONTO</span>
+    </div>
+    <div class="ability-card" id="ability-hyperspace">
+      <kbd>Q</kbd>
+      <span class="ability-name">HIPERESPAÇO</span>
+      <span class="ability-status" id="hyperspace-status">PRONTO</span>
+    </div>
+  </section>
+
+  <section id="powerup-hud" aria-label="Armamento e power-ups" hidden>
+    <div class="power-card" id="power-weapon">
+      <span class="power-label">ARMAMENTO</span>
+      <strong class="power-name" id="weapon-name">PADRÃO</strong>
+      <span class="power-time" id="weapon-time">SEM BÔNUS</span>
+      <span id="weapon-meter" class="power-meter" role="progressbar" aria-label="Duração do armamento temporário" aria-valuemin="0" aria-valuemax="0" aria-valuenow="0"><span id="weapon-fill" class="power-meter-fill"></span></span>
+    </div>
+    <div class="power-card" id="power-drones">
+      <span class="power-label">SUPORTE</span>
+      <strong class="power-name">DRONES</strong>
+      <span class="power-time" id="drones-time">INATIVOS</span>
+      <span id="drones-meter" class="power-meter" role="progressbar" aria-label="Duração dos drones de suporte" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0"><span id="drones-fill" class="power-meter-fill"></span></span>
+    </div>
+    <div class="power-card power-emp" id="power-emp">
+      <kbd>F</kbd>
+      <span class="power-label">CARGA TÁTICA</span>
+      <strong class="power-name">EMP</strong>
+      <span class="power-time" id="emp-status">VAZIO</span>
+    </div>
+    <p id="powerup-announcer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
+  </section>
+
+  <div id="overlay-start" class="overlay">
+    <div class="overlay-box">
+      <h1 class="title">ASTEROIDS</h1>
+      <p class="subtitle">
+        S / seta para baixo: freia<br>
+        Setas/WASD para mover · Espaço para atirar · P/Esc para pausar<br>
+        Shift: impulso · E: repulsor · Q: hiperespaço · F: ativar EMP armazenado
+      </p>
+      <button id="btn-start" class="btn-primary" type="button">INICIAR</button>
+      <p class="hint">ou pressione Enter</p>
+    </div>
+  </div>
+
+  <div id="overlay-pause" class="overlay" hidden>
+    <div class="overlay-box">
+      <h1 class="title">PAUSADO</h1>
+      <button id="btn-resume" class="btn-primary" type="button">CONTINUAR</button>
+      <p class="hint">P ou Esc para retomar</p>
+    </div>
+  </div>
+
+  <div id="overlay-gameover" class="overlay" hidden>
+    <div class="overlay-box">
+      <h1 class="title title-error">FIM DE JOGO</h1>
+      <div class="final-score">
+        <span class="hud-label">PONTUAÇÃO FINAL</span>
+        <span class="hud-value big" id="final-score">000000</span>
+        <strong class="new-high-score" id="new-high-score" hidden>NOVO RECORDE</strong>
+      </div>
+      <button id="btn-restart" class="btn-primary" type="button">REINICIAR</button>
+      <p class="hint">ou pressione R</p>
+    </div>
+  </div>
+
+  <button id="btn-pause" class="btn-pause" type="button" aria-label="Pausar" hidden>PAUSAR</button>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
