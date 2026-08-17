@@ -1159,7 +1159,16 @@ export function updateUfo(
       const orbitDir = ufo.orbitDirection === undefined
         ? strafeDirection(ufo)
         : ufo.orbitDirection;
-      desiredAngle = computeOrbitAngle(ufo, ship, range, balance.orbitRange ?? range, orbitDir, w, h);
+      desiredAngle = computeOrbitAngle(
+        ufo,
+        ship,
+        range,
+        balance.orbitRange ?? range,
+        orbitDir,
+        balance.strafeAngle,
+        w,
+        h,
+      );
     } else if (behavior === 'approachRetreat') {
       desiredAngle = computeApproachRetreatAngle(ufo, ship, range, balance, dt, w, h);
     } else if (behavior === 'keepDistance') {
@@ -1341,7 +1350,7 @@ export function updateUfo(
  * direction that keeps the UFO at roughly orbitRange while still closing when
  * far outside the orbit band.
  */
-function computeOrbitAngle(ufo, ship, range, orbitRange, orbitDir, w, h) {
+function computeOrbitAngle(ufo, ship, range, orbitRange, orbitDir, strafeAngle, w, h) {
   const dx = torusDelta(ufo.x, ship.x, w);
   const dy = torusDelta(ufo.y, ship.y, h);
   const toShip = Math.atan2(dy, dx);
@@ -1351,7 +1360,10 @@ function computeOrbitAngle(ufo, ship, range, orbitRange, orbitDir, w, h) {
   const inner = orbitRange - band;
   const outer = orbitRange + band;
 
-  const tangentAngle = toShip + orbitDir * Math.PI / 2;
+  const resolvedStrafeAngle = Number.isFinite(strafeAngle)
+    ? strafeAngle
+    : Math.PI / 2;
+  const tangentAngle = toShip + orbitDir * resolvedStrafeAngle;
 
   if (range < inner) {
     // Very close to the ship: mostly flee, but keep a tangent component near the
@@ -1389,24 +1401,29 @@ function computeApproachRetreatAngle(ufo, ship, range, balance, dt, w, h) {
 
   const approachRange = balance.approachRange ?? 220;
   const retreatRange = balance.retreatRange ?? 320;
+  const phaseDuration = finiteNonNegative(balance.phaseDuration, 2.2);
 
-  // Count down the phase timer; when it expires, flip phase to create a
-  // cadence independent of exact range noise.
+  // Count down the phase timer.  Reaching an engagement boundary changes the
+  // persisted phase immediately; otherwise the timer supplies a fallback
+  // cadence if the Fighter cannot reach the boundary (for example while
+  // avoiding a field).  Persisting the boundary transition is important: a
+  // local-only change made the next frame resume the stale phase.
   let phase = ufo.approachRetreatPhase ?? 'approach';
   let timer = Math.max(0, (ufo.approachRetreatTimer ?? 0) - dt);
-  if (timer <= 0) {
+
+  if (phase === 'approach' && range <= approachRange) {
+    phase = 'retreat';
+    timer = phaseDuration;
+  } else if (phase === 'retreat' && range >= retreatRange) {
+    phase = 'approach';
+    timer = phaseDuration;
+  } else if (phaseDuration > 0 && timer <= 0) {
     phase = phase === 'approach' ? 'retreat' : 'approach';
-    timer = balance.phaseDuration ?? 2.2;
+    timer = phaseDuration;
   }
+
   ufo.approachRetreatPhase = phase;
   ufo.approachRetreatTimer = timer;
-
-  // Hard guards: if extremely far, approach; if extremely close, retreat.
-  if (range > retreatRange * 1.25) {
-    phase = 'approach';
-  } else if (range < approachRange * 0.6) {
-    phase = 'retreat';
-  }
 
   return phase === 'approach' ? toShip : normalizeAngle(toShip + Math.PI);
 }

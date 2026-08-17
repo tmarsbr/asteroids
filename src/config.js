@@ -364,6 +364,7 @@ export const CONFIG = {
       fireCooldown: 0.64,
       behavior: 'orbit',
       orbitRange: 170,
+      strafeAngle: Math.PI / 2,
       preferredRange: 170,
       predictionLead: 0,
       maxPredictionLead: 0,

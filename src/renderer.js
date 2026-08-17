@@ -12,8 +12,8 @@ export function draw(state, ctx, w, h) {
   ctx.fillStyle = '#050508';
   ctx.fillRect(0, 0, w, h);
 
-  // Draw starfield (static, deterministic)
-  drawStars(ctx, w, h);
+  // Draw dynamic multi-layer space background
+  drawSpaceBackground(ctx, w, h);
 
   // Environmental hazards sit behind entities, but still wrap visually.
   for (const cloud of state.iceClouds ?? []) {
@@ -117,16 +117,138 @@ function drawWithEdgeCopies(ctx, entity, w, h, drawFn, radiusOverride) {
   }
 }
 
-function drawStars(ctx, w, h) {
-  // Simple static starfield — drawn once per frame, no animation needed
+function drawSpaceBackground(ctx, w, h) {
+  const reducedMotion = reducedMotionQuery?.matches;
+  const t = reducedMotion
+    ? 0
+    : (typeof performance !== 'undefined' ? performance.now() * 0.001 : 0);
+
+  // Background layers in depth order:
+  paintNebula(ctx, w, h, t);
+  paintGrid(ctx, w, h, t);
+  paintStarLayer(ctx, w, h, t, { count: 40, speed: 2, sizeMin: 0.6, sizeMax: 1, alpha: 0.14, seed: 1 });
+  paintPlanets(ctx, w, h, t);
+  paintStarLayer(ctx, w, h, t, { count: 28, speed: 10, sizeMin: 0.8, sizeMax: 1.4, alpha: 0.22, seed: 2 });
+  paintDebris(ctx, w, h, t);
+  paintStarLayer(ctx, w, h, t, { count: 16, speed: 22, sizeMin: 1.2, sizeMax: 1.8, alpha: 0.32, seed: 3 });
+}
+
+function paintStarLayer(ctx, w, h, t, opts) {
+  const { count, speed, sizeMin, sizeMax, alpha, seed } = opts;
   ctx.save();
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
-  // Use a fixed seed pattern for stars
-  for (let i = 0; i < 80; i++) {
-    const x = (i * 73 + 17) % w;
-    const y = (i * 41 + 29) % h;
-    const size = (i % 3 === 0) ? 1.5 : 0.8;
+  ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+  const mw = w + 60;
+  const mh = h + 60;
+  for (let i = 0; i < count; i++) {
+    const baseX = (i * 71 + seed * 131 + 17) % mw;
+    const baseY = (i * 43 + seed * 89 + 29) % mh;
+    const x = ((baseX - t * speed) % mw + mw) % mw - 30;
+    const y = ((baseY - t * speed * 0.35) % mh + mh) % mh - 30;
+    const size = sizeMin + (i % 3) * (sizeMax - sizeMin) / 2;
     ctx.fillRect(x, y, size, size);
+  }
+  ctx.restore();
+}
+
+function paintNebula(ctx, w, h, t) {
+  const blobs = [
+    { hue: 'rgba(154, 88, 255, 0.11)', x: 0.22, y: 0.32, r: 0.55 },
+    { hue: 'rgba(0, 221, 221, 0.08)', x: 0.75, y: 0.62, r: 0.5 },
+    { hue: 'rgba(255, 68, 221, 0.07)', x: 0.55, y: 0.15, r: 0.4 },
+  ];
+  ctx.save();
+  for (let i = 0; i < blobs.length; i++) {
+    const b = blobs[i];
+    const cx = b.x * w + Math.sin(t * 0.05 + b.x * 9) * w * 0.03;
+    const cy = b.y * h + Math.cos(t * 0.04 + b.y * 9) * h * 0.03;
+    const r = b.r * Math.max(w, h);
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+    g.addColorStop(0, b.hue);
+    g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function paintPlanets(ctx, w, h, t) {
+  const planets = [
+    { x: 0.82, y: 0.24, r: 0.1, color: '#8fb0ff', shade: '#182449', ring: false, speed: 0.4 },
+    { x: 0.14, y: 0.76, r: 0.055, color: '#ffb27a', shade: '#4a2513', ring: true, speed: 0.25 },
+  ];
+  ctx.save();
+  for (let i = 0; i < planets.length; i++) {
+    const p = planets[i];
+    const cx = p.x * w + Math.sin(t * p.speed) * 6;
+    const cy = p.y * h + Math.cos(t * p.speed) * 4;
+    const r = p.r * Math.min(w, h);
+    if (p.ring) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
+      ctx.lineWidth = Math.max(1, r * 0.1);
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, r * 1.8, r * 0.5, -0.3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    const grad = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.35, r * 0.1, cx, cy, r);
+    grad.addColorStop(0, p.color);
+    grad.addColorStop(1, p.shade);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function paintGrid(ctx, w, h, t) {
+  const spacing = 46;
+  const offX = (t * 6) % spacing;
+  const offY = (t * 3) % spacing;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(0, 221, 221, 0.045)';
+  ctx.lineWidth = 1;
+  for (let x = -spacing + offX; x < w + spacing; x += spacing) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, h);
+    ctx.stroke();
+  }
+  for (let y = -spacing + offY; y < h + spacing; y += spacing) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(w, y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function paintDebris(ctx, w, h, t) {
+  ctx.save();
+  ctx.strokeStyle = 'rgba(150, 170, 190, 0.45)';
+  ctx.lineWidth = 1.2;
+  for (let i = 0; i < 6; i++) {
+    const speed = 8 + (i % 3) * 6;
+    const mw = w + 80;
+    const mh = h + 80;
+    const baseX = (i * 97 + 40) % mw;
+    const baseY = (i * 53 + 20) % mh;
+    const x = ((baseX - t * speed) % mw + mw) % mw - 40;
+    const y = ((baseY - t * speed * 0.3) % mh + mh) % mh - 40;
+    const size = 5 + (i % 4) * 2.5;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(t * 0.4 + i);
+    ctx.beginPath();
+    ctx.moveTo(size, 0);
+    ctx.lineTo(size * 0.2, size * 0.8);
+    ctx.lineTo(-size * 0.7, size * 0.3);
+    ctx.lineTo(-size * 0.4, -size * 0.6);
+    ctx.lineTo(size * 0.3, -size * 0.7);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
   }
   ctx.restore();
 }
@@ -344,11 +466,6 @@ function drawShip(ctx, ship) {
     if (blink) ctx.globalAlpha = 0.3;
   }
 
-  ctx.strokeStyle = '#00dddd';
-  ctx.lineWidth = 2;
-  ctx.shadowColor = 'rgba(0, 221, 221, 0.5)';
-  ctx.shadowBlur = 6;
-
   const r = ship.radius;
 
   // Ghost silhouettes make the fixed-direction dash readable at a glance.
@@ -372,18 +489,50 @@ function drawShip(ctx, ship) {
     ctx.restore();
   }
 
+  // Main hull: Interceptor
+  ctx.strokeStyle = '#00dddd';
+  ctx.fillStyle = 'rgba(0, 221, 221, 0.06)';
+  ctx.shadowColor = 'rgba(0, 221, 221, 0.55)';
+  ctx.shadowBlur = 8;
+  ctx.lineWidth = 2.2;
+  ctx.lineJoin = 'round';
+
   traceShipPath(ctx, r);
+  ctx.fill();
   ctx.stroke();
 
-  // Engine flame
+  // Wing trim accents
+  ctx.strokeStyle = 'rgba(0, 221, 221, 0.65)';
+  ctx.lineWidth = 1.4;
+  ctx.shadowBlur = 4;
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.15, r * 0.5);
+  ctx.lineTo(-r * 0.55, r * 0.28);
+  ctx.moveTo(-r * 0.15, -r * 0.5);
+  ctx.lineTo(-r * 0.55, -r * 0.28);
+  ctx.stroke();
+
+  // Cockpit canopy glow
+  ctx.fillStyle = '#fff27a';
+  ctx.shadowColor = '#fff27a';
+  ctx.shadowBlur = 6;
+  ctx.beginPath();
+  ctx.ellipse(r * 0.32, 0, r * 0.16, r * 0.09, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Dual engine thruster flames
   if (ship.thrusting && !ship.dashing) {
+    const flameLen = r * 0.85 + Math.random() * r * 0.25;
     ctx.strokeStyle = '#ff44dd';
-    ctx.shadowColor = 'rgba(255, 68, 221, 0.6)';
+    ctx.shadowColor = 'rgba(255, 68, 221, 0.75)';
     ctx.shadowBlur = 8;
-    ctx.beginPath();
-    ctx.moveTo(-r * 0.5, 0);
-    ctx.lineTo(-r * 1.6 - Math.random() * 4, 0);
-    ctx.stroke();
+    ctx.lineWidth = 2;
+    [r * 0.16, -r * 0.16].forEach(oy => {
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.7, oy);
+      ctx.lineTo(-r * 0.7 - flameLen, oy * 0.35);
+      ctx.stroke();
+    });
   }
 
   ctx.restore();
@@ -391,10 +540,16 @@ function drawShip(ctx, ship) {
 
 function traceShipPath(ctx, r) {
   ctx.beginPath();
-  ctx.moveTo(r, 0);
-  ctx.lineTo(-r * 0.8, r * 0.7);
-  ctx.lineTo(-r * 0.5, 0);
-  ctx.lineTo(-r * 0.8, -r * 0.7);
+  ctx.moveTo(r * 1.15, 0);
+  ctx.lineTo(r * 0.35, r * 0.22);
+  ctx.lineTo(-r * 0.15, r * 0.5);
+  ctx.lineTo(-r * 0.85, r * 0.62);
+  ctx.lineTo(-r * 0.55, r * 0.28);
+  ctx.lineTo(-r * 0.7, 0);
+  ctx.lineTo(-r * 0.55, -r * 0.28);
+  ctx.lineTo(-r * 0.85, -r * 0.62);
+  ctx.lineTo(-r * 0.15, -r * 0.5);
+  ctx.lineTo(r * 0.35, -r * 0.22);
   ctx.closePath();
 }
 

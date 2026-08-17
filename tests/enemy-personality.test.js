@@ -105,6 +105,20 @@ test('scout direction is deterministic by id', () => {
   );
 });
 
+test('scout reads its strafe angle from the archetype configuration', () => {
+  const cfg = cloneConfig();
+  cfg.ufo.scout.speed = 0;
+  cfg.ufo.scout.turnRate = 1000;
+  cfg.ufo.scout.strafeAngle = 0;
+  const ship = makeShip(400, 300);
+  const scout = makeUfo(cfg, 'scout', 400, 130, { angle: 0, id: 2 });
+
+  updateUfo(scout, DT, ship, cfg, W, H, []);
+
+  assertClose(scout.angle, Math.PI / 2, 0.001,
+    'zero strafe angle should make the Scout face the ship at orbit range');
+});
+
 test('scout does not ram the ship when starting inside orbitRange', () => {
   const cfg = cloneConfig();
   const ship = makeShip(400, 300);
@@ -167,6 +181,35 @@ test('fighter obeys hard guard: retreat when very close', () => {
 
   const d = torusDistance(fighter.x, fighter.y, ship.x, ship.y, W, H);
   assert.ok(d > cfg.ufo.fighter.approachRange * 0.6, 'fighter should back off when too close');
+});
+
+test('fighter persists phase changes at approach and retreat boundaries', () => {
+  const cfg = cloneConfig();
+  const ship = makeShip(400, 300);
+  const fighter = makeUfo(
+    cfg,
+    'fighter',
+    400,
+    300 + cfg.ufo.fighter.approachRange - 1,
+    { angle: -Math.PI / 2, id: 17 },
+  );
+
+  updateUfo(fighter, DT, ship, cfg, W, H, []);
+  assert.equal(fighter.approachRetreatPhase, 'retreat',
+    'crossing approachRange should start and retain the retreat phase');
+  assertClose(fighter.approachRetreatTimer, cfg.ufo.fighter.phaseDuration, EPS,
+    'the retreat phase should receive a fresh configured duration');
+
+  // Use the horizontal axis: the configured retreat range may cross the
+  // vertical toroidal seam on the default world.
+  fighter.x = 400 + cfg.ufo.fighter.retreatRange + 1;
+  fighter.y = 300;
+  fighter.approachRetreatPhase = 'retreat';
+  fighter.approachRetreatTimer = cfg.ufo.fighter.phaseDuration;
+  updateUfo(fighter, DT, ship, cfg, W, H, []);
+
+  assert.equal(fighter.approachRetreatPhase, 'approach',
+    'crossing retreatRange should start and retain the approach phase');
 });
 
 // ============================================================================

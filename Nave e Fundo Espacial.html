@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Nave e Fundo Espacial</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #050508; display: flex; align-items: center; justify-content: center; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+    #__bundler_loading { position: fixed; bottom: 20px; right: 20px; font: 13px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; color: #666; background: #fff; padding: 8px 14px; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.12); z-index: 10000; }
+    #__bundler_thumbnail { position: fixed; inset: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: #050508; z-index: 9999; }
+    #__bundler_thumbnail svg { width: 100%; height: 100%; object-fit: contain; }
+    #__bundler_placeholder { color: #999; font-size: 14px; }
+  </style>
+  <noscript>
+    <style>#__bundler_loading { display: none; }</style>
+    <div style="position:fixed;bottom:12px;left:12px;font:13px/1.4 -apple-system,BlinkMacSystemFont,sans-serif;color:#999;background:rgba(255,255,255,0.9);padding:6px 12px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,0.08);z-index:10000;">
+      This page requires JavaScript to display.
+    </div>
+  </noscript>
+</head>
+<body>
+  <div id="__bundler_thumbnail">
+<svg viewBox="0 0 200 140" xmlns="http://www.w3.org/2000/svg">
+<rect width="200" height="140" fill="#050508"></rect>
+<polygon points="150,70 60,40 78,70 60,100" fill="none" stroke="#00dddd" stroke-width="4"></polygon>
+<line x1="60" y1="100" x2="30" y2="70" stroke="#ff44dd" stroke-width="4"></line>
+</svg>
+</div>
+  <div id="__bundler_loading">Unpacking...</div>
+
+  <script>
+    
+document.addEventListener('DOMContentLoaded', async function() {
+  const loading = document.getElementById('__bundler_loading');
+  function setStatus(msg) { if (loading) loading.textContent = msg; }
+
+  const FONT_MIME = /^(font[/]|application[/](x-)?font-|application[/]vnd\.ms-fontobject)/i;
+  const MIME_TOKEN = /^[\w.+-]+[/][\w.+-]+$/;
+  function toBase64(bytes) {
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(bin);
+  }
+
+  // Error sink persists across replaceWith since it's on window, not the DOM.
+  window.addEventListener('error', function(e) {
+    // Failed resource loads (CSP-blocked links, scripts, images) fire plain
+    // events at the element — warn only; real JS errors carry message/error.
+    if (!e.message && !e.error && e.target && e.target !== window) {
+      console.warn('[bundle] resource failed to load:',
+        e.target.tagName, String(e.target.src || e.target.href || ''));
+      return;
+    }
+    var p = document.body || document.documentElement;
+    var d = document.getElementById('__bundler_err') || p.appendChild(document.createElement('div'));
+    d.id = '__bundler_err';
+    d.style.cssText = 'position:fixed;bottom:12px;left:12px;right:12px;font:12px/1.4 ui-monospace,monospace;background:#2a1215;color:#ff8a80;padding:10px 14px;border-radius:8px;border:1px solid #5c2b2e;z-index:99999;white-space:pre-wrap;max-height:40vh;overflow:auto';
+    d.textContent = (d.textContent ? d.textContent + String.fromCharCode(10) : '') +
+      '[bundle] ' + (e.message || e.type) +
+      (e.filename ? ' (' + e.filename.slice(0, 60) + ':' + e.lineno + ')' : '');
+  }, true);
+
+  try {
+    const manifestEl = document.querySelector('script[type="__bundler/manifest"]');
+    const templateEl = document.querySelector('script[type="__bundler/template"]');
+    if (!manifestEl || !templateEl) {
+      setStatus('Error: missing bundle data');
+      console.error('[bundler] Missing script tags — manifestEl:', !!manifestEl, 'templateEl:', !!templateEl);
+      return;
+    }
+
+    const manifest = JSON.parse(manifestEl.textContent);
+    let template = JSON.parse(templateEl.textContent);
+
+    // Nested page bundles (iframe targets). Each ships ONCE, in the ROOT
+    // document's manifest; frame srcs carry an about:blank#<uuid> marker
+    // instead of a substitutable uuid. Every document mints the blobs for
+    // its OWN frames — from local text at the root, or text obtained from
+    // its DIRECT parent over the relay protocol below — so each frame
+    // navigation stays same-origin with its initiator and a deduped page
+    // loads at any depth on any host, including a file:// download's
+    // opaque origins (where a blob minted by one document cannot be
+    // navigated to by another).
+    const pageOrderEl = document.querySelector('script[type="__bundler/page_order"]');
+    const pageOrder = pageOrderEl ? JSON.parse(pageOrderEl.textContent) : [];
+    const pageSet = new Set(pageOrder);
+    const pageTexts = {};
+
+    // ── Nested-page text protocol (parent-chain relay) ──
+    // Page bundles ship once, in the ROOT document's manifest. Every
+    // document mints the blobs for its OWN frames, obtaining page text
+    // through a strict parent-chain relay: a document only ever SENDS to
+    // its direct parent (which, for every document the publisher's own
+    // runtime minted, is another publisher document) and only ACCEPTS
+    // text from that direct parent; requests from below are honored only
+    // for the document's own child frames, and the ROOT never sends
+    // upward at all. That last rule is load-bearing: the artifact host's
+    // frame-ancestors allows claude.ai (and friends) to frame an
+    // artifact, so window.top can be a FOREIGN document — a top-addressed
+    // protocol would hand page uuids to that ancestor and accept forged
+    // "page text" from it, minting attacker HTML as an artifact-origin
+    // blob document. The chain never touches the ancestor: requests stop
+    // at the root, replies are origin-addressed per hop (never '*' when
+    // an origin exists), and both directions are origin-gated (on https
+    // a foreign sender's origin can never equal this document's; in
+    // opaque contexts — file:// — everything serializes as 'null', where
+    // an embedded EXTERNAL frame still fails the gate by carrying its
+    // own real origin, and a sandboxed child of such a frame is excluded
+    // by the own-child-frames check plus uuid unguessability). Shape is
+    // deny-by-default: one request form, one reply form, no error
+    // replies.
+    // window.origin is the SERIALIZED SECURITY origin ('null' in opaque
+    // contexts such as a sandboxed preview iframe) — location.origin is
+    // computed from the URL and stays 'https://…' even when the document
+    // is sandboxed, which would misgate every opaque chain.
+    const OWN_TARGET = /^https?:[/][/]/.test(window.origin || '')
+      ? window.origin
+      : '*';
+    function trustedOrigin(e) {
+      if (e.origin === window.origin) return true; // https chains; opaque==opaque
+      // file:// trees: Chrome serializes the file document's origin as
+      // 'file://' while the blob: documents it mints serialize as 'null',
+      // so the two legitimate shapes can never string-match — accept the
+      // pair in both directions. https origins never serialize as either,
+      // and sender identity (own child frame / direct parent) is checked
+      // separately.
+      return (
+        (e.origin === 'null' &&
+          (window.origin === 'file://' ||
+            window.location.protocol === 'file:')) ||
+        (/^file:/.test(e.origin) && window.origin === 'null')
+      );
+    }
+    // Non-empty only in the root document (nested bundles ship an empty
+    // island), so it doubles as the root marker: the root answers from
+    // local text and treats a miss as authoritative — never relaying to
+    // its (possibly foreign) parent.
+    const isPageRoot = pageOrder.length > 0;
+    const blobUrls = {};
+    const resourceBlobs = {};
+    const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+    const pendingFrames = {}; // uuid -> [{el, frag}] awaiting text for own frames
+    const pendingRelays = {}; // uuid -> [childWindow] awaiting text to pass down
+    function mountPage(el, frag, text) {
+      const pageBlob = new Blob([text], { type: 'text/html' });
+      const u = URL.createObjectURL(pageBlob);
+      resourceBlobs[u] = pageBlob;
+      el.src = u + frag;
+    }
+    function deliverPage(uuid, text) {
+      const frames = pendingFrames[uuid];
+      delete pendingFrames[uuid];
+      if (frames) for (const f of frames) mountPage(f.el, f.frag, text);
+      const relays = pendingRelays[uuid];
+      delete pendingRelays[uuid];
+      if (relays) {
+        for (const cw of relays) {
+          try { cw.postMessage({ __bundler_page: uuid, __bundler_text: text }, OWN_TARGET); } catch (err) { /* gone */ }
+        }
+      }
+    }
+    function ownFrameWindows() {
+      const out = [];
+      for (const f of Array.from(document.querySelectorAll('iframe'))) {
+        try { if (f.contentWindow) out.push(f.contentWindow); } catch (err) { /* detached */ }
+      }
+      return out;
+    }
+    window.addEventListener('message', function (e) {
+      const d = e.data;
+      if (!d || typeof d !== 'object' || !e.source) return;
+      // Origin gate first; the structural checks below (own-child-frames
+      // for requests, direct-parent + solicited-uuid for replies, the
+      // root's never-relay rule) are what hold in fully opaque chains
+      // where origin strings can't discriminate — a sandboxed root's
+      // FOREIGN wrapper still fails all three even though both serialize
+      // as real-vs-'null' rather than matching.
+      if (!trustedOrigin(e)) return;
+      if (typeof d.__bundler_need === 'string' && UUID_SHAPE.test(d.__bundler_need)) {
+        // Requests are honored only for this document's own child frames.
+        if (ownFrameWindows().indexOf(e.source) < 0) return;
+        const uuid = d.__bundler_need;
+        const text = pageTexts[uuid];
+        if (typeof text === 'string') {
+          try { e.source.postMessage({ __bundler_page: uuid, __bundler_text: text }, OWN_TARGET); } catch (err) { /* gone */ }
+          return;
+        }
+        if (isPageRoot || window.parent === window) return; // authoritative miss
+        const waiting = pendingRelays[uuid];
+        if (waiting) {
+          if (waiting.indexOf(e.source) < 0) waiting.push(e.source);
+          return;
+        }
+        // Never-answered uuids would otherwise accumulate forever under a
+        // request spray; past the cap (far above any real page count) new
+        // relays are dropped rather than remembered.
+        if (Object.keys(pendingRelays).length >= 128) return;
+        pendingRelays[uuid] = [e.source];
+        window.parent.postMessage({ __bundler_need: uuid }, OWN_TARGET);
+      } else if (
+        typeof d.__bundler_page === 'string' &&
+        UUID_SHAPE.test(d.__bundler_page) &&
+        typeof d.__bundler_text === 'string'
+      ) {
+        // The shape test is load-bearing beyond tidiness: the solicited
+        // check below uses the in operator, which matches prototype keys
+        // ('__proto__', 'constructor') — an unshaped key would reach
+        // deliverPage and throw, painting the error banner.
+        // Text is accepted only from the direct parent — the document
+        // that minted this one.
+        if (e.source !== window.parent || window.parent === window) return;
+        if (!(d.__bundler_page in pendingFrames) && !(d.__bundler_page in pendingRelays)) return;
+        deliverPage(d.__bundler_page, d.__bundler_text);
+      }
+    });
+
+    const uuids = Object.keys(manifest);
+    setStatus('Unpacking ' + uuids.length + ' assets...');
+
+    await Promise.all(uuids.map(async (uuid) => {
+      const entry = manifest[uuid];
+      try {
+        const binaryStr = atob(entry.data);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+
+        let finalBytes = bytes;
+        if (entry.compressed) {
+          if (typeof DecompressionStream !== 'undefined') {
+            const ds = new DecompressionStream('gzip');
+            const writer = ds.writable.getWriter();
+            const reader = ds.readable.getReader();
+            writer.write(bytes);
+            writer.close();
+            const chunks = [];
+            let totalLen = 0;
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              chunks.push(value);
+              totalLen += value.length;
+            }
+            finalBytes = new Uint8Array(totalLen);
+            let offset = 0;
+            for (const chunk of chunks) { finalBytes.set(chunk, offset); offset += chunk.length; }
+          } else {
+            console.warn('DecompressionStream not available, asset ' + uuid + ' may not render');
+          }
+        }
+
+        if (pageSet.has(uuid)) {
+          pageTexts[uuid] = new TextDecoder().decode(finalBytes);
+          return;
+        }
+        if (FONT_MIME.test(entry.mime) && MIME_TOKEN.test(entry.mime)) {
+          // Strict artifact hosts allow font-src data: but not blob:.
+          blobUrls[uuid] = 'data:' + entry.mime + ';base64,' +
+            (entry.compressed ? toBase64(finalBytes) : entry.data);
+        } else {
+          const blob = new Blob([finalBytes], { type: entry.mime });
+          blobUrls[uuid] = URL.createObjectURL(blob);
+          resourceBlobs[blobUrls[uuid]] = blob;
+        }
+      } catch (err) {
+        console.error('Failed to decode asset ' + uuid + ':', err);
+        const blob = new Blob([], { type: entry.mime });
+        blobUrls[uuid] = URL.createObjectURL(blob);
+        resourceBlobs[blobUrls[uuid]] = blob;
+      }
+    }));
+
+    const extResEl = document.querySelector('script[type="__bundler/ext_resources"]');
+    const extResources = extResEl ? JSON.parse(extResEl.textContent) : [];
+    const resourceMap = {};
+    for (const entry of extResources) {
+      if (blobUrls[entry.uuid]) resourceMap[entry.id] = blobUrls[entry.uuid];
+    }
+
+    // Artifact-host CSP (connect-src 'self') refuses fetch() of blob: URLs —
+    // consumers read these Blobs directly. Survives the swap like the error sink.
+    window.__resourceBlobs = resourceBlobs;
+
+    setStatus('Rendering...');
+    // Page uuids have no blob here — they ride inside about:blank#<uuid>
+    // frame markers the pass below resolves after the swap.
+    for (const uuid of uuids) {
+      if (pageSet.has(uuid)) continue;
+      template = template.split(uuid).join(blobUrls[uuid]);
+    }
+
+    // Strip integrity + crossorigin — blob URLs from a file:// document inherit
+    // a null origin, so crossorigin forces a CORS fetch that SRI then rejects.
+    // The manifest bytes are ours; SRI protects against CDN compromise, not this.
+    template = template.replace(/\s+integrity="[^"]*"/gi, '').replace(/\s+crossorigin="[^"]*"/gi, '');
+
+    const resourceScript = '<script>window.__resources = ' +
+      JSON.stringify(resourceMap).replace(/<\//g, '<\\/') +
+      ';</' + 'script>';
+    // Inject after <head> so the DOCTYPE stays first; prepending the script
+    // would push the parser into quirks mode. DOMParser always emits a <head>
+    // (synthesizing one if the source HTML omitted it) but may carry
+    // attributes through, so match the full opening tag. slice() rather than
+    // replace() keeps us clear of $-pattern substitution in resourceScript.
+    const headOpen = template.match(/<head[^>]*>/i);
+    if (headOpen) {
+      const i = headOpen.index + headOpen[0].length;
+      template = template.slice(0, i) + resourceScript + template.slice(i);
+    }
+
+    // Parse the template and swap the root element. Scripts inserted via
+    // DOMParser/replaceWith are inert per spec — re-create each with
+    // createElement so they execute, awaiting onload for src scripts to
+    // preserve ordering (React before ReactDOM before Babel before text/babel).
+    const doc = new DOMParser().parseFromString(template, 'text/html');
+    document.documentElement.replaceWith(doc.documentElement);
+
+    // Resolve page-frame markers: mint this document's own blob for each
+    // framed page — from local text when this is the root, otherwise by
+    // asking the direct parent over the relay protocol above. An
+    // unanswered request leaves the frame on about:blank, the same
+    // degraded state as a refused embed.
+    {
+      const MARKER = /^about:blank#([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(#.*)?$/;
+      const needed = [];
+      for (const el of Array.from(document.querySelectorAll('iframe'))) {
+        const m = MARKER.exec(el.getAttribute('src') || '');
+        if (!m) continue;
+        const text = pageTexts[m[1]];
+        if (typeof text === 'string') {
+          mountPage(el, m[2] || '', text);
+        } else if (window.parent !== window && !isPageRoot) {
+          const had = pendingFrames[m[1]];
+          (pendingFrames[m[1]] = had || []).push({ el: el, frag: m[2] || '' });
+          if (!had) needed.push(m[1]);
+        }
+      }
+      for (const uuid of needed) {
+        window.parent.postMessage({ __bundler_need: uuid }, OWN_TARGET);
+      }
+    }
+
+    const dead = Array.from(document.scripts);
+    for (const old of dead) {
+      const s = document.createElement('script');
+      for (const a of old.attributes) s.setAttribute(a.name, a.value);
+      s.textContent = old.textContent;
+      // text/babel scripts with a src: read and inline. transformScriptTags
+      // does XHR against the src, but blob:null/ from a file:// origin is
+      // silently dropped. Inlining makes it a plain inline babel script,
+      // which transformScriptTags handles unconditionally.
+      if ((s.type === 'text/babel' || s.type === 'text/jsx') && s.src) {
+        const pre = resourceBlobs[s.src.split('#')[0]];
+        s.textContent = pre ? await pre.text() : await (await fetch(s.src)).text();
+        s.removeAttribute('src');
+      }
+      const p = s.src ? new Promise(function(r) { s.onload = s.onerror = r; }) : null;
+      old.replaceWith(s);
+      if (p) await p;
+    }
+    // Babel standalone auto-transforms type=text/babel on DOMContentLoaded,
+    // which fired before we swapped the document. Trigger manually if present.
+    if (window.Babel && typeof window.Babel.transformScriptTags === 'function') {
+      window.Babel.transformScriptTags();
+    }
+  } catch (err) {
+    setStatus('Error unpacking: ' + err.message);
+    console.error('Bundle unpack error:', err);
+  }
+});
+
+  </script>
+
+  <script type="__bundler/manifest">
+{}
+  </script>
+
+  <script type="__bundler/ext_resources">
+[]
+  </script>
+
+  <script type="__bundler/page_order">
+[]
+  </script>
+
+  <script type="__bundler/template">
+"<!DOCTYPE html>\n<html lang=\"pt-BR\"><head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>Nave e Fundo Espacial<\u002Ftitle>\n\n<style>\nbody{margin:0;background:#f0eee9;font-family:system-ui,sans-serif}\n.dv-turn{padding:40px 44px 32px;border-bottom:1px solid rgba(0,0,0,.08)}\n.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 20px}\n.dv-tid{font:600 10px ui-monospace,Menlo,monospace;padding:3px 7px;background:#1a1a1a;color:#fff;border-radius:4px;text-decoration:none}\n.dv-tname{font:600 13px/1.2 system-ui,sans-serif;color:#1a1a1a}\n.dv-opts{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}\n.dv-opt{flex:none;display:flex;flex-direction:column;gap:9px}\n.dv-oid{font:600 10.5px ui-monospace,Menlo,monospace;padding:3px 7px;background:rgba(0,0,0,.08);color:#1a1a1a;border-radius:5px;text-decoration:none}\n.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 11px/1.3 system-ui,sans-serif;color:rgba(0,0,0,.55)}\n.dv-card{max-width:100%;background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.06);overflow:hidden;line-height:0}\n.dv-opt:target .dv-oid{background:#2a78d6;color:#fff}\n.dv-next{margin:22px 0 0;font:12px/1.5 system-ui,sans-serif;color:rgba(0,0,0,.5)}\ncanvas.dv-canvas{display:block;background:#050508}\na{color:#2a78d6}\na:hover{color:#1a5aa8}\n<\u002Fstyle>\n<\u002Fhead>\n<body>\n<section class=\"dv-turn\" id=\"t2\">\n<div class=\"dv-thd\"><a class=\"dv-tid\" href=\"#t2\">2<\u002Fa><span class=\"dv-tname\">Nova nave (interceptor/retiarius) e fundo espacial<\u002Fspan><\u002Fdiv>\n<div style=\"font:600 12px system-ui,sans-serif;color:rgba(0,0,0,.65);margin:0 0 14px\">Naves — dardo interceptador e foice retiarius, mais detalhadas, 3 paletas<\u002Fdiv>\n<div class=\"dv-opts\">\n<div class=\"dv-opt\" id=\"2a\"><div class=\"dv-olabel\"><a class=\"dv-oid\" href=\"#2a\">2a<\u002Fa>Interceptor — Ciano clássico<\u002Fdiv><div class=\"dv-card\" style=\"width:260px\"><canvas class=\"dv-canvas\" data-ship=\"interceptor\" data-palette=\"cyan\" data-bg=\"current\" width=\"260\" height=\"190\" style=\"width:260px;height:190px\"><\u002Fcanvas><\u002Fdiv><\u002Fdiv>\n<div class=\"dv-opt\" id=\"2b\"><div class=\"dv-olabel\"><a class=\"dv-oid\" href=\"#2b\">2b<\u002Fa>Interceptor — Roxo &amp; Dourado<\u002Fdiv><div class=\"dv-card\" style=\"width:260px\"><canvas class=\"dv-canvas\" data-ship=\"interceptor\" data-palette=\"purple-gold\" data-bg=\"current\" width=\"260\" height=\"190\" style=\"width:260px;height:190px\"><\u002Fcanvas><\u002Fdiv><\u002Fdiv>\n<div class=\"dv-opt\" id=\"2c\"><div class=\"dv-olabel\"><a class=\"dv-oid\" href=\"#2c\">2c<\u002Fa>Interceptor — Âmbar &amp; Ciano<\u002Fdiv><div class=\"dv-card\" style=\"width:260px\"><canvas class=\"dv-canvas\" data-ship=\"interceptor\" data-palette=\"amber-cyan\" data-bg=\"current\" width=\"260\" height=\"190\" style=\"width:260px;height:190px\"><\u002Fcanvas><\u002Fdiv><\u002Fdiv>\n<div class=\"dv-opt\" id=\"2d\"><div class=\"dv-olabel\"><a class=\"dv-oid\" href=\"#2d\">2d<\u002Fa>Retiarius — Foice, Azul &amp; Ouro<\u002Fdiv><div class=\"dv-card\" style=\"width:260px\"><canvas class=\"dv-canvas\" data-ship=\"retiarius\" data-palette=\"blue-gold\" data-bg=\"current\" width=\"260\" height=\"190\" style=\"width:260px;height:190px\"><\u002Fcanvas><\u002Fdiv><\u002Fdiv>\n<\u002Fdiv>\n<div style=\"font:600 12px system-ui,sans-serif;color:rgba(0,0,0,.65);margin:28px 0 14px\">Fundos — cada elemento isolado, e a composição completa<\u002Fdiv>\n<div class=\"dv-opts\">\n<div class=\"dv-opt\" id=\"2e\"><div class=\"dv-olabel\"><a class=\"dv-oid\" href=\"#2e\">2e<\u002Fa>Nebulosas coloridas<\u002Fdiv><div class=\"dv-card\" style=\"width:260px\"><canvas class=\"dv-canvas\" data-ship=\"none\" data-bg=\"nebula\" width=\"260\" height=\"190\" style=\"width:260px;height:190px\"><\u002Fcanvas><\u002Fdiv><\u002Fdiv>\n<div class=\"dv-opt\" id=\"2f\"><div class=\"dv-olabel\"><a class=\"dv-oid\" href=\"#2f\">2f<\u002Fa>Planetas &amp; luas<\u002Fdiv><div class=\"dv-card\" style=\"width:260px\"><canvas class=\"dv-canvas\" data-ship=\"none\" data-bg=\"planets\" width=\"260\" height=\"190\" style=\"width:260px;height:190px\"><\u002Fcanvas><\u002Fdiv><\u002Fdiv>\n<div class=\"dv-opt\" id=\"2g\"><div class=\"dv-olabel\"><a class=\"dv-oid\" href=\"#2g\">2g<\u002Fa>Grade vetorial<\u002Fdiv><div class=\"dv-card\" style=\"width:260px\"><canvas class=\"dv-canvas\" data-ship=\"none\" data-bg=\"grid\" width=\"260\" height=\"190\" style=\"width:260px;height:190px\"><\u002Fcanvas><\u002Fdiv><\u002Fdiv>\n<div class=\"dv-opt\" id=\"2h\"><div class=\"dv-olabel\"><a class=\"dv-oid\" href=\"#2h\">2h<\u002Fa>Destroços à deriva<\u002Fdiv><div class=\"dv-card\" style=\"width:260px\"><canvas class=\"dv-canvas\" data-ship=\"none\" data-bg=\"debris\" width=\"260\" height=\"190\" style=\"width:260px;height:190px\"><\u002Fcanvas><\u002Fdiv><\u002Fdiv>\n<div class=\"dv-opt\" id=\"2i\"><div class=\"dv-olabel\"><a class=\"dv-oid\" href=\"#2i\">2i<\u002Fa>Estrelas em camadas (parallax)<\u002Fdiv><div class=\"dv-card\" style=\"width:260px\"><canvas class=\"dv-canvas\" data-ship=\"none\" data-bg=\"parallax\" width=\"260\" height=\"190\" style=\"width:260px;height:190px\"><\u002Fcanvas><\u002Fdiv><\u002Fdiv>\n<div class=\"dv-opt\" id=\"2j\"><div class=\"dv-olabel\"><a class=\"dv-oid\" href=\"#2j\">2j<\u002Fa>Composição completa<\u002Fdiv><div class=\"dv-card\" style=\"width:480px\"><canvas class=\"dv-canvas\" data-ship=\"none\" data-bg=\"full\" width=\"480\" height=\"280\" style=\"width:480px;height:280px\"><\u002Fcanvas><\u002Fdiv><\u002Fdiv>\n<\u002Fdiv>\n<p class=\"dv-next\">Diga qual nave prefere (ex: \"2b mas com chama ciano\") e se o fundo fica em 2j completo ou mais discreto durante o jogo.<\u002Fp>\n<\u002Fsection>\n<section class=\"dv-turn\" id=\"t1\">\n<div class=\"dv-thd\"><a class=\"dv-tid\" href=\"#t1\">1<\u002Fa><span class=\"dv-tname\">Estado atual — recriado de src/renderer.js<\u002Fspan><\u002Fdiv>\n<div class=\"dv-opts\">\n<div class=\"dv-opt\" id=\"1a\">\n<div class=\"dv-olabel\"><a class=\"dv-oid\" href=\"#1a\">1a<\u002Fa>Nave + fundo, como estão hoje no jogo<\u002Fdiv>\n<div class=\"dv-card\" style=\"width:360px\">\n<canvas class=\"dv-canvas\" data-ship=\"current\" data-bg=\"current\" width=\"360\" height=\"240\" style=\"width:360px;height:240px\"><\u002Fcanvas>\n<\u002Fdiv>\n<\u002Fdiv>\n<\u002Fdiv>\n<p class=\"dv-next\">Triângulo entalhado (traceShipPath) girando pra ver de todos os ângulos, chama do propulsor em magenta, e as 80 estrelas fixas de drawStars — cores exatas de styles.css (--cyan #00dddd, --magenta #ff44dd) sobre o fundo #050508.<\u002Fp>\n<\u002Fsection>\n<script>\n(function () {\n  var PALETTES = {\n    cyan: { hull: '#00dddd', trim: 'rgba(0,221,221,0.6)', cockpit: '#fff27a', flame: '#ff44dd', glow: 'rgba(0,221,221,0.55)' },\n    'purple-gold': { hull: '#ffcf66', trim: '#b478ff', cockpit: '#63f6ff', flame: '#c58bff', glow: 'rgba(255,207,102,0.5)' },\n    'amber-cyan': { hull: '#ff9a3b', trim: '#00dddd', cockpit: '#fff6d8', flame: '#7de8ff', glow: 'rgba(255,154,59,0.5)' },\n    'blue-gold': { hull: '#5ea8ff', trim: '#ffcc55', cockpit: '#bfe9ff', flame: '#ffe28a', glow: 'rgba(94,168,255,0.55)' },\n  };\n  function getPalette(name) { return PALETTES[name] || PALETTES.cyan; }\n\n  function paintStarLayer(ctx, w, h, t, opts) {\n    var count = opts.count, speed = opts.speed, sizeMin = opts.sizeMin, sizeMax = opts.sizeMax, alpha = opts.alpha, seed = opts.seed;\n    ctx.save();\n    ctx.fillStyle = 'rgba(255, 255, 255, ' + alpha + ')';\n    var mw = w + 60, mh = h + 60;\n    for (var i = 0; i < count; i++) {\n      var baseX = (i * 71 + seed * 131 + 17) % mw;\n      var baseY = (i * 43 + seed * 89 + 29) % mh;\n      var x = ((baseX - t * speed) % mw + mw) % mw - 30;\n      var y = ((baseY - t * speed * 0.35) % mh + mh) % mh - 30;\n      var size = sizeMin + (i % 3) * (sizeMax - sizeMin) / 2;\n      ctx.fillRect(x, y, size, size);\n    }\n    ctx.restore();\n  }\n\n  function paintNebula(ctx, w, h, t) {\n    var blobs = [\n      { hue: 'rgba(154, 88, 255, 0.11)', x: 0.22, y: 0.32, r: 0.55 },\n      { hue: 'rgba(0, 221, 221, 0.08)', x: 0.75, y: 0.62, r: 0.5 },\n      { hue: 'rgba(255, 68, 221, 0.07)', x: 0.55, y: 0.15, r: 0.4 },\n    ];\n    ctx.save();\n    for (var i = 0; i < blobs.length; i++) {\n      var b = blobs[i];\n      var cx = b.x * w + Math.sin(t * 0.05 + b.x * 9) * w * 0.03;\n      var cy = b.y * h + Math.cos(t * 0.04 + b.y * 9) * h * 0.03;\n      var r = b.r * Math.max(w, h);\n      var g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);\n      g.addColorStop(0, b.hue);\n      g.addColorStop(1, 'rgba(0,0,0,0)');\n      ctx.fillStyle = g;\n      ctx.beginPath();\n      ctx.arc(cx, cy, r, 0, Math.PI * 2);\n      ctx.fill();\n    }\n    ctx.restore();\n  }\n\n  function paintPlanets(ctx, w, h, t) {\n    var planets = [\n      { x: 0.82, y: 0.24, r: 0.1, color: '#8fb0ff', shade: '#182449', ring: false, speed: 0.4 },\n      { x: 0.14, y: 0.76, r: 0.055, color: '#ffb27a', shade: '#4a2513', ring: true, speed: 0.25 },\n    ];\n    ctx.save();\n    for (var i = 0; i < planets.length; i++) {\n      var p = planets[i];\n      var cx = p.x * w + Math.sin(t * p.speed) * 6;\n      var cy = p.y * h + Math.cos(t * p.speed) * 4;\n      var r = p.r * Math.min(w, h);\n      if (p.ring) {\n        ctx.strokeStyle = 'rgba(255,255,255,0.28)';\n        ctx.lineWidth = Math.max(1, r * 0.1);\n        ctx.beginPath();\n        ctx.ellipse(cx, cy, r * 1.8, r * 0.5, -0.3, 0, Math.PI * 2);\n        ctx.stroke();\n      }\n      var grad = ctx.createRadialGradient(cx - r * 0.35, cy - r * 0.35, r * 0.1, cx, cy, r);\n      grad.addColorStop(0, p.color);\n      grad.addColorStop(1, p.shade);\n      ctx.fillStyle = grad;\n      ctx.beginPath();\n      ctx.arc(cx, cy, r, 0, Math.PI * 2);\n      ctx.fill();\n    }\n    ctx.restore();\n  }\n\n  function paintGrid(ctx, w, h, t) {\n    var spacing = 46;\n    var offX = (t * 6) % spacing;\n    var offY = (t * 3) % spacing;\n    ctx.save();\n    ctx.strokeStyle = 'rgba(0, 221, 221, 0.08)';\n    ctx.lineWidth = 1;\n    for (var x = -spacing + offX; x < w + spacing; x += spacing) {\n      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();\n    }\n    for (var y = -spacing + offY; y < h + spacing; y += spacing) {\n      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();\n    }\n    ctx.restore();\n  }\n\n  function paintDebris(ctx, w, h, t) {\n    ctx.save();\n    ctx.strokeStyle = 'rgba(150, 170, 190, 0.55)';\n    ctx.lineWidth = 1.2;\n    for (var i = 0; i < 6; i++) {\n      var speed = 8 + (i % 3) * 6;\n      var mw = w + 80, mh = h + 80;\n      var baseX = (i * 97 + 40) % mw;\n      var baseY = (i * 53 + 20) % mh;\n      var x = ((baseX - t * speed) % mw + mw) % mw - 40;\n      var y = ((baseY - t * speed * 0.3) % mh + mh) % mh - 40;\n      var size = 5 + (i % 4) * 2.5;\n      ctx.save();\n      ctx.translate(x, y);\n      ctx.rotate(t * 0.4 + i);\n      ctx.beginPath();\n      ctx.moveTo(size, 0);\n      ctx.lineTo(size * 0.2, size * 0.8);\n      ctx.lineTo(-size * 0.7, size * 0.3);\n      ctx.lineTo(-size * 0.4, -size * 0.6);\n      ctx.lineTo(size * 0.3, -size * 0.7);\n      ctx.closePath();\n      ctx.stroke();\n      ctx.restore();\n    }\n    ctx.restore();\n  }\n\n  function paintBackground(ctx, w, h, t, kind) {\n    if (kind === 'current' || !kind) {\n      ctx.save();\n      ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';\n      for (var i = 0; i < 80; i++) {\n        var x = (i * 73 + 17) % w;\n        var y = (i * 41 + 29) % h;\n        var size = (i % 3 === 0) ? 1.5 : 0.8;\n        ctx.fillRect(x, y, size, size);\n      }\n      ctx.restore();\n      return;\n    }\n    if (kind === 'nebula') { paintNebula(ctx, w, h, t); return; }\n    if (kind === 'planets') { paintPlanets(ctx, w, h, t); return; }\n    if (kind === 'grid') { paintGrid(ctx, w, h, t); return; }\n    if (kind === 'debris') { paintDebris(ctx, w, h, t); return; }\n    if (kind === 'parallax') {\n      paintStarLayer(ctx, w, h, t, { count: 40, speed: 2, sizeMin: 0.6, sizeMax: 1, alpha: 0.12, seed: 1 });\n      paintStarLayer(ctx, w, h, t, { count: 32, speed: 10, sizeMin: 0.8, sizeMax: 1.4, alpha: 0.22, seed: 2 });\n      paintStarLayer(ctx, w, h, t, { count: 18, speed: 22, sizeMin: 1.2, sizeMax: 1.8, alpha: 0.34, seed: 3 });\n      return;\n    }\n    if (kind === 'full') {\n      paintNebula(ctx, w, h, t);\n      paintGrid(ctx, w, h, t);\n      paintStarLayer(ctx, w, h, t, { count: 40, speed: 2, sizeMin: 0.6, sizeMax: 1, alpha: 0.12, seed: 1 });\n      paintPlanets(ctx, w, h, t);\n      paintStarLayer(ctx, w, h, t, { count: 28, speed: 10, sizeMin: 0.8, sizeMax: 1.4, alpha: 0.22, seed: 2 });\n      paintDebris(ctx, w, h, t);\n      paintStarLayer(ctx, w, h, t, { count: 16, speed: 22, sizeMin: 1.2, sizeMax: 1.8, alpha: 0.32, seed: 3 });\n      return;\n    }\n  }\n\n  function traceShipCurrent(ctx, r) {\n    ctx.beginPath();\n    ctx.moveTo(r, 0);\n    ctx.lineTo(-r * 0.8, r * 0.7);\n    ctx.lineTo(-r * 0.5, 0);\n    ctx.lineTo(-r * 0.8, -r * 0.7);\n    ctx.closePath();\n  }\n\n  function drawInterceptor(ctx, r, palette) {\n    ctx.strokeStyle = palette.hull;\n    ctx.fillStyle = 'rgba(255,255,255,0.04)';\n    ctx.shadowColor = palette.glow;\n    ctx.shadowBlur = 8;\n    ctx.lineWidth = 2.2;\n    ctx.lineJoin = 'round';\n    ctx.beginPath();\n    ctx.moveTo(r * 1.15, 0);\n    ctx.lineTo(r * 0.35, r * 0.22);\n    ctx.lineTo(-r * 0.15, r * 0.5);\n    ctx.lineTo(-r * 0.85, r * 0.62);\n    ctx.lineTo(-r * 0.55, r * 0.28);\n    ctx.lineTo(-r * 0.7, 0);\n    ctx.lineTo(-r * 0.55, -r * 0.28);\n    ctx.lineTo(-r * 0.85, -r * 0.62);\n    ctx.lineTo(-r * 0.15, -r * 0.5);\n    ctx.lineTo(r * 0.35, -r * 0.22);\n    ctx.closePath();\n    ctx.fill();\n    ctx.stroke();\n\n    ctx.strokeStyle = palette.trim;\n    ctx.lineWidth = 1.4;\n    ctx.shadowBlur = 4;\n    ctx.beginPath();\n    ctx.moveTo(-r * 0.15, r * 0.5);\n    ctx.lineTo(-r * 0.55, r * 0.28);\n    ctx.moveTo(-r * 0.15, -r * 0.5);\n    ctx.lineTo(-r * 0.55, -r * 0.28);\n    ctx.stroke();\n\n    ctx.fillStyle = palette.cockpit;\n    ctx.shadowColor = palette.cockpit;\n    ctx.shadowBlur = 6;\n    ctx.beginPath();\n    ctx.ellipse(r * 0.32, 0, r * 0.16, r * 0.09, 0, 0, Math.PI * 2);\n    ctx.fill();\n\n    var flameLen = r * 0.85 + Math.random() * r * 0.18;\n    ctx.strokeStyle = palette.flame;\n    ctx.shadowColor = palette.flame;\n    ctx.shadowBlur = 8;\n    ctx.lineWidth = 2;\n    [r * 0.16, -r * 0.16].forEach(function (oy) {\n      ctx.beginPath();\n      ctx.moveTo(-r * 0.7, oy);\n      ctx.lineTo(-r * 0.7 - flameLen, oy * 0.4);\n      ctx.stroke();\n    });\n  }\n\n  function drawRetiarius(ctx, r, palette, t) {\n    ctx.strokeStyle = palette.hull;\n    ctx.fillStyle = 'rgba(255,255,255,0.04)';\n    ctx.shadowColor = palette.glow;\n    ctx.shadowBlur = 8;\n    ctx.lineWidth = 2.2;\n    ctx.lineJoin = 'round';\n    ctx.beginPath();\n    ctx.moveTo(r * 0.55, r * 0.05);\n    ctx.quadraticCurveTo(r * 0.1, r * 0.5, -r * 0.6, r * 0.78);\n    ctx.quadraticCurveTo(-r * 0.32, r * 0.3, -r * 0.38, 0);\n    ctx.quadraticCurveTo(-r * 0.32, -r * 0.3, -r * 0.6, -r * 0.78);\n    ctx.quadraticCurveTo(r * 0.1, -r * 0.5, r * 0.55, -r * 0.05);\n    ctx.closePath();\n    ctx.fill();\n    ctx.stroke();\n\n    ctx.strokeStyle = palette.trim;\n    ctx.lineWidth = 1.3;\n    ctx.shadowBlur = 4;\n    ctx.beginPath();\n    ctx.moveTo(r * 0.1, r * 0.42);\n    ctx.quadraticCurveTo(-r * 0.25, r * 0.55, -r * 0.58, r * 0.72);\n    ctx.moveTo(r * 0.1, -r * 0.42);\n    ctx.quadraticCurveTo(-r * 0.25, -r * 0.55, -r * 0.58, -r * 0.72);\n    ctx.stroke();\n\n    ctx.fillStyle = palette.cockpit;\n    ctx.shadowColor = palette.cockpit;\n    ctx.shadowBlur = 6;\n    ctx.beginPath();\n    ctx.ellipse(-r * 0.05, 0, r * 0.14, r * 0.11, 0, 0, Math.PI * 2);\n    ctx.fill();\n\n    var pulse = 0.5 + Math.sin(t * 4) * 0.5;\n    ctx.strokeStyle = palette.cockpit;\n    ctx.shadowColor = palette.cockpit;\n    ctx.shadowBlur = 10 + pulse * 8;\n    ctx.lineWidth = 1.6 + pulse * 0.6;\n    ctx.beginPath();\n    ctx.moveTo(r * 0.55, 0);\n    ctx.lineTo(r * 1.25, 0);\n    ctx.stroke();\n\n    ctx.strokeStyle = palette.flame;\n    ctx.shadowColor = palette.flame;\n    ctx.shadowBlur = 8;\n    ctx.lineWidth = 2;\n    ctx.beginPath();\n    ctx.moveTo(-r * 0.38, 0);\n    ctx.lineTo(-r * 0.38 - r * 0.7 - Math.random() * r * 0.15, 0);\n    ctx.stroke();\n  }\n\n  function paintShip(ctx, w, h, t, kind, paletteName) {\n    if (kind === 'none') return;\n    if (kind === 'current' || !kind) {\n      var r0 = Math.min(w, h) * 0.16;\n      ctx.save();\n      ctx.translate(w / 2, h / 2);\n      ctx.rotate(t * 0.6);\n      ctx.strokeStyle = '#00dddd';\n      ctx.lineWidth = 2;\n      ctx.shadowColor = 'rgba(0, 221, 221, 0.5)';\n      ctx.shadowBlur = 6;\n      traceShipCurrent(ctx, r0);\n      ctx.stroke();\n      ctx.strokeStyle = '#ff44dd';\n      ctx.shadowColor = 'rgba(255, 68, 221, 0.6)';\n      ctx.shadowBlur = 8;\n      ctx.beginPath();\n      ctx.moveTo(-r0 * 0.5, 0);\n      ctx.lineTo(-r0 * 1.6 - Math.random() * 4, 0);\n      ctx.stroke();\n      ctx.restore();\n      return;\n    }\n    var r = Math.min(w, h) * 0.24;\n    var palette = getPalette(paletteName);\n    ctx.save();\n    ctx.translate(w / 2, h / 2);\n    ctx.rotate(t * 0.5);\n    if (kind === 'interceptor') drawInterceptor(ctx, r, palette, t);\n    else if (kind === 'retiarius') drawRetiarius(ctx, r, palette, t);\n    ctx.restore();\n  }\n\n  function setup() {\n    var dpr = window.devicePixelRatio || 1;\n    var canvases = Array.prototype.slice.call(document.querySelectorAll('canvas.dv-canvas'));\n    var items = canvases.map(function (canvas) {\n      var cssW = canvas.width, cssH = canvas.height;\n      canvas.width = Math.round(cssW * dpr);\n      canvas.height = Math.round(cssH * dpr);\n      return {\n        ctx: canvas.getContext('2d'),\n        cssW: cssW, cssH: cssH,\n        ship: canvas.getAttribute('data-ship') || 'current',\n        bg: canvas.getAttribute('data-bg') || 'current',\n        palette: canvas.getAttribute('data-palette') || 'cyan',\n      };\n    });\n    var start = null;\n    function frame(ts) {\n      if (start === null) start = ts;\n      var t = (ts - start) / 1000;\n      for (var i = 0; i < items.length; i++) {\n        var it = items[i];\n        var ctx = it.ctx, w = it.cssW, h = it.cssH;\n        ctx.save();\n        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);\n        ctx.fillStyle = '#050508';\n        ctx.fillRect(0, 0, w, h);\n        paintBackground(ctx, w, h, t, it.bg);\n        paintShip(ctx, w, h, t, it.ship, it.palette);\n        ctx.restore();\n      }\n      requestAnimationFrame(frame);\n    }\n    requestAnimationFrame(frame);\n  }\n\n  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setup);\n  else setup();\n})();\n<\u002Fscript>\n\n\n<\u002Fbody><\u002Fhtml>"
+  </script>
+</body>
+</html>
